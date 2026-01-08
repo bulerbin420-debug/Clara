@@ -1,7 +1,0 @@
-{
-  "name": "Live Avatar Assistant",
-  "description": "An interactive AI assistant with a context-aware female avatar that adjusts poses and reacts naturally to conversation using the Gemini Live API.",
-  "requestFramePermissions": [
-    "microphone"
-  ]
-}
