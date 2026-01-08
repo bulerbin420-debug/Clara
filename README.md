@@ -18,3 +18,12 @@ View your app in AI Studio: https://ai.studio/apps/drive/1TSlrAfx9sybphdgvmxg0-7
 2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
 3. Run the app:
    `npm run dev`
+
+
+## Avatar Image
+
+The default avatar image is served from the Vite `public/` folder:
+
+- `public/Clara.jpg`
+
+If you want to replace it, keep the same filename or update `components/Avatar.tsx`.
