@@ -51,23 +51,106 @@ export default function App() {
   const currentOutputTransRef = useRef('');
 
   // --- File Upload Handler ---
-  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
-    if (file) {
+    if (!file) return;
+
+    try {
+      // Normalize so uploads always fit the Avatar window cleanly
+      const normalized = await normalizeAvatarImage(file);
+
+      setCustomImage(normalized);
+
+      // User uploads are regular photos -> use Simulated mode (NOT sprite sheet mode)
+      setIsSpriteMode(false);
+      setShowSettings(false);
+    } catch (err) {
+      console.error('Upload failed:', err);
+      // Fallback: at least try raw dataURL
       const reader = new FileReader();
       reader.onload = (e) => {
         const result = e.target?.result as string;
         setCustomImage(result);
-        // Default to FALSE (Simulated/Auto-Crop Mode) for user uploads
-        // This ensures regular photos look good immediately.
-        setIsSpriteMode(false); 
+        setIsSpriteMode(false);
         setShowSettings(false);
       };
       reader.readAsDataURL(file);
+    } finally {
+      // Reset input so re-uploading the same file triggers onChange
+      event.target.value = '';
     }
   };
 
-  // --- Audio Infrastructure ---
+  
+  // --- Image Normalize Helper (fit uploads to the Avatar window) ---
+  // Crops to the Avatar's aspect ratio (w:h = 320:384) and downscales for performance.
+  const normalizeAvatarImage = async (file: File, outW = 640, outH = 768): Promise<string> => {
+    // Prefer createImageBitmap so EXIF orientation is honored in modern browsers (when supported)
+    let sourceW = 0, sourceH = 0;
+    let drawSource: CanvasImageSource;
+
+    try {
+      // @ts-ignore
+      const bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
+      sourceW = bitmap.width;
+      sourceH = bitmap.height;
+      drawSource = bitmap;
+    } catch {
+      // Fallback path
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = () => reject(reader.error);
+        reader.readAsDataURL(file);
+      });
+      const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+        const im = new Image();
+        im.onload = () => resolve(im);
+        im.onerror = () => reject(new Error('Failed to load image'));
+        im.src = dataUrl;
+      });
+      sourceW = img.naturalWidth || img.width;
+      sourceH = img.naturalHeight || img.height;
+      drawSource = img;
+    }
+
+    const targetAR = outW / outH;
+    const srcAR = sourceW / sourceH;
+
+    let cropW = sourceW;
+    let cropH = sourceH;
+    let cropX = 0;
+    let cropY = 0;
+
+    if (srcAR > targetAR) {
+      // Image is wider than target -> crop width
+      cropH = sourceH;
+      cropW = Math.round(sourceH * targetAR);
+      cropX = Math.round((sourceW - cropW) / 2);
+      cropY = 0;
+    } else {
+      // Image is taller than target -> crop height (bias upward a bit to keep faces in view)
+      cropW = sourceW;
+      cropH = Math.round(sourceW / targetAR);
+      cropX = 0;
+      const extra = sourceH - cropH;
+      cropY = Math.round(extra * 0.18); // 18% down from top
+    }
+
+    const canvas = document.createElement('canvas');
+    canvas.width = outW;
+    canvas.height = outH;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('Canvas not supported');
+
+    ctx.drawImage(drawSource as any, cropX, cropY, cropW, cropH, 0, 0, outW, outH);
+
+    // Keep JPG if original was JPG; otherwise use PNG to preserve transparency (if any)
+    const wantsJpg = /jpe?g/i.test(file.type);
+    return canvas.toDataURL(wantsJpg ? 'image/jpeg' : 'image/png', wantsJpg ? 0.92 : undefined as any);
+  };
+
+// --- Audio Infrastructure ---
 
   const ensureAudioContext = useCallback(() => {
     if (!audioContextRef.current) {
@@ -451,7 +534,7 @@ export default function App() {
 
             {/* Avatar Container */}
             <div className="relative group">
-                <Avatar pose={avatarPose} imageUrl={customImage || undefined} isSpriteMode={!!customImage || isSpriteMode} />
+                <Avatar pose={avatarPose} imageUrl={customImage || undefined} isSpriteMode={isSpriteMode} />
                 
                 {/* Visualizer Overlay */}
                 <div className="absolute bottom-0 left-0 right-0 h-20 bg-gradient-to-t from-stone-900 to-transparent flex items-end justify-center pb-4 pointer-events-none">

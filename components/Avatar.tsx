@@ -4,7 +4,9 @@ import { AvatarPose } from '../types';
 // Strategies for loading the avatar:
 // 1. Try the local file from Vite public folder ('public/Clara.jpg')
 // 2. Fallback to a reliable external URL if local fails to load
-const LOCAL_AVATAR = `${import.meta.env.BASE_URL}Clara.jpg`;
+const LOCAL_AVATAR = new URL('../assets/Clara.jpg', import.meta.url).href;
+// Extra safety: if the bundled asset path fails for some reason, this public path often still works.
+const LOCAL_AVATAR_PUBLIC = `${import.meta.env.BASE_URL}Clara.jpg`;
 const FALLBACK_AVATAR = 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?q=80&w=800&auto=format&fit=crop';
 
 interface AvatarProps {
@@ -24,13 +26,33 @@ const Avatar: React.FC<AvatarProps> = ({ pose, imageUrl, isSpriteMode = false })
       return;
     }
 
-    // Try to load the local image
-    const img = new Image();
-    img.src = LOCAL_AVATAR;
-    img.onload = () => setCurrentSrc(LOCAL_AVATAR);
-    img.onerror = () => {
-      console.warn('Failed to load local avatar, falling back to external image.');
-      setCurrentSrc(FALLBACK_AVATAR);
+    // Try to load the local avatar (bundled asset first, then public path)  
+    let cancelled = false;
+
+    const trySources = [LOCAL_AVATAR, LOCAL_AVATAR_PUBLIC];
+
+    const tryLoad = (idx: number) => {
+      if (cancelled) return;
+      const src = trySources[idx];
+      const img = new Image();
+      img.onload = () => {
+        if (!cancelled) setCurrentSrc(src);
+      };
+      img.onerror = () => {
+        if (idx + 1 < trySources.length) {
+          tryLoad(idx + 1);
+        } else {
+          console.warn('Failed to load local avatar from bundled + public paths; falling back to external image.');
+          if (!cancelled) setCurrentSrc(FALLBACK_AVATAR);
+        }
+      };
+      img.src = src;
+    };
+
+    tryLoad(0);
+
+    return () => {
+      cancelled = true;
     };
   }, [imageUrl]);
 
