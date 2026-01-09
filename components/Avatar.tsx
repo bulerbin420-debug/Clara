@@ -2,9 +2,8 @@ import React, { useMemo, useState, useEffect } from 'react';
 import { AvatarPose } from '../types';
 
 // Strategies for loading the avatar:
-// 1. Try the local file from Vite's public folder (works on Vercel): `${BASE_URL}Clara.jpg`
+// 1. Try the local file at root ('/Clara.jpg')
 // 2. Fallback to a reliable external URL if local fails
-// NOTE: import.meta.env.BASE_URL is '/' by default, but keeps things working if you ever deploy under a sub-path.
 const LOCAL_AVATAR = `${import.meta.env.BASE_URL}Clara.jpg`;
 const FALLBACK_AVATAR = 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?q=80&w=800&auto=format&fit=crop';
 

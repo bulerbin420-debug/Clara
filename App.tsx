@@ -51,100 +51,86 @@ export default function App() {
   const currentOutputTransRef = useRef('');
 
   // --- File Upload Handler ---
-  // We normalize the uploaded image into the same aspect ratio as the visible avatar window
-  // so it always fills the frame nicely (no "random torso" crops).
-  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
+// We normalize user uploads to the avatar window aspect ratio (w-80 x h-96 => 320x384 => 5:6)
+// and output a high-quality resized image so it always fits the visible avatar frame.
+const cropAndResizeToAvatar = (dataUrl: string): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    // data URLs are same-origin, no CORS needed
+    img.onload = () => {
+      const srcW = img.naturalWidth || img.width;
+      const srcH = img.naturalHeight || img.height;
 
+      // Target aspect ratio = 320 / 384 = 5 / 6
+      const targetAspect = 5 / 6;
+
+      // Compute crop rect (centered, with slight upward bias to keep faces)
+      let cropW = srcW;
+      let cropH = Math.round(cropW / targetAspect);
+      if (cropH > srcH) {
+        cropH = srcH;
+        cropW = Math.round(cropH * targetAspect);
+      }
+
+      const biasY = 0.42; // 0.5 would be dead-center; 0.42 biases upward a bit
+      const cx = Math.round((srcW - cropW) / 2);
+      const cy = Math.round((srcH - cropH) * biasY);
+
+      const outW = 640;   // 2x the visible frame for crispness
+      const outH = 768;
+
+      const canvas = document.createElement('canvas');
+      canvas.width = outW;
+      canvas.height = outH;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        reject(new Error('Canvas not supported'));
+        return;
+      }
+
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(img, cx, cy, cropW, cropH, 0, 0, outW, outH);
+
+      // Prefer JPEG for broad compatibility + smaller size.
+      const out = canvas.toDataURL('image/jpeg', 0.92);
+      resolve(out);
+    };
+    img.onerror = () => reject(new Error('Failed to decode image'));
+    img.src = dataUrl;
+  });
+};
+
+const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+  const file = event.target.files?.[0];
+  if (!file) return;
+
+  // Some phones produce HEIC/HEIF which many browsers can't decode reliably.
+  // If that happens, ask for JPG/PNG. We'll still try to read it.
+  const reader = new FileReader();
+  reader.onload = async (e) => {
     try {
-      const normalized = await normalizeAvatarFile(file);
+      const raw = e.target?.result as string;
+      const normalized = await cropAndResizeToAvatar(raw);
       setCustomImage(normalized);
-
-      // Default to FALSE (Simulated/Auto-Crop Mode) for user uploads.
-      // Sprite mode is only for actual sprite sheets.
+      // Keep sprite mode OFF for normal user photos
       setIsSpriteMode(false);
       setShowSettings(false);
-
-      // Reset input so selecting the same file again still triggers onChange
-      event.target.value = '';
-    } catch (e) {
-      console.error(e);
-      setError('Unable to load that image. Please try a JPG/PNG image.');
+    } catch (err) {
+      console.warn('Avatar upload processing failed, using raw image.', err);
+      const raw = e.target?.result as string;
+      setCustomImage(raw);
+      setIsSpriteMode(false);
+      setShowSettings(false);
     }
   };
+  reader.readAsDataURL(file);
 
-  // --- Avatar Image Normalization (Crop + Resize) ---
-  // Avatar window is 320x384 in Tailwind (w-80 h-96) => aspect ~ 0.8333.
-  // We output a reasonable size to keep memory/network in check.
-  const AVATAR_OUT_W = 640;
-  const AVATAR_OUT_H = 768; // 640/768 = 0.8333
-  const AVATAR_ASPECT = AVATAR_OUT_W / AVATAR_OUT_H;
+  // Allow re-uploading the same file to retrigger change
+  event.currentTarget.value = '';
+};
 
-  const readFileAsDataURL = (f: File) =>
-    new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(String(reader.result));
-      reader.onerror = () => reject(new Error('FileReader failed'));
-      reader.readAsDataURL(f);
-    });
-
-  const loadImage = (src: string) =>
-    new Promise<HTMLImageElement>((resolve, reject) => {
-      const img = new Image();
-      img.onload = () => resolve(img);
-      img.onerror = () => reject(new Error('Image failed to load'));
-      img.src = src;
-    });
-
-  const normalizeAvatarFile = async (f: File) => {
-    const dataUrl = await readFileAsDataURL(f);
-    const img = await loadImage(dataUrl);
-
-    const srcW = img.naturalWidth || img.width;
-    const srcH = img.naturalHeight || img.height;
-    if (!srcW || !srcH) throw new Error('Invalid image dimensions');
-
-    // Compute a center crop that matches the avatar aspect ratio.
-    let cropX = 0;
-    let cropY = 0;
-    let cropW = srcW;
-    let cropH = srcH;
-
-    const srcAspect = srcW / srcH;
-    if (srcAspect > AVATAR_ASPECT) {
-      // Too wide: crop left/right
-      cropH = srcH;
-      cropW = Math.round(cropH * AVATAR_ASPECT);
-      cropX = Math.round((srcW - cropW) / 2);
-      cropY = 0;
-    } else if (srcAspect < AVATAR_ASPECT) {
-      // Too tall: crop top/bottom, bias upward a bit to keep faces in frame
-      cropW = srcW;
-      cropH = Math.round(cropW / AVATAR_ASPECT);
-      const maxY = Math.max(0, srcH - cropH);
-
-      // 0 = top, 0.5 = center. 0.18 tends to keep faces better in typical portraits.
-      const bias = 0.18;
-      cropY = Math.round(maxY * bias);
-      cropX = 0;
-    }
-
-    const canvas = document.createElement('canvas');
-    canvas.width = AVATAR_OUT_W;
-    canvas.height = AVATAR_OUT_H;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) throw new Error('Canvas 2D not supported');
-
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = 'high';
-    ctx.drawImage(img, cropX, cropY, cropW, cropH, 0, 0, AVATAR_OUT_W, AVATAR_OUT_H);
-
-    // Output as JPEG for broad browser support and smaller size
-    return canvas.toDataURL('image/jpeg', 0.92);
-  };
-
-  // --- Audio Infrastructure ---
+// --- Audio Infrastructure ---
 
   const ensureAudioContext = useCallback(() => {
     if (!audioContextRef.current) {
@@ -528,8 +514,6 @@ export default function App() {
 
             {/* Avatar Container */}
             <div className="relative group">
-                {/* IMPORTANT: Do NOT force sprite mode when a custom image is present.
-                    Sprite mode is only for real sprite sheets; standard photos should use simulated mode. */}
                 <Avatar pose={avatarPose} imageUrl={customImage || undefined} isSpriteMode={isSpriteMode} />
                 
                 {/* Visualizer Overlay */}
