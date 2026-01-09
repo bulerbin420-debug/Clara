@@ -50,69 +50,76 @@ export default function App() {
   const currentInputTransRef = useRef('');
   const currentOutputTransRef = useRef('');
 
-
-  // Crop + resize uploaded avatar to match the visible avatar window (w-80 x h-96 => 320x384 aspect)
-  const processUserAvatarImage = async (dataUrl: string) => {
-    const TARGET_W = 640; // 2x for crispness
-    const TARGET_H = 768;
-    const targetAspect = TARGET_W / TARGET_H;
-
-    return await new Promise<string>((resolve) => {
+  // --- File Upload Handler ---
+  
+  // Normalize user-uploaded avatar photos to match the visible avatar window (w-80 h-96 = 320x384 aspect).
+  // - Crops using "cover" so the image always fills the frame (no stretching).
+  // - Slight upward bias to better keep faces centered.
+  const normalizeAvatarImage = (dataUrl: string, outW = 640, outH = 768): Promise<string> => {
+    return new Promise((resolve, reject) => {
       const img = new Image();
       img.onload = () => {
-        const imgAspect = img.width / img.height;
+        try {
+          const iw = img.naturalWidth || img.width;
+          const ih = img.naturalHeight || img.height;
 
-        let sx = 0;
-        let sy = 0;
-        let sw = img.width;
-        let sh = img.height;
+          // Cover scale -> compute source crop rect
+          const scale = Math.max(outW / iw, outH / ih);
+          const sw = outW / scale;
+          const sh = outH / scale;
 
-        if (imgAspect > targetAspect) {
-          // Too wide: crop left/right
-          sw = img.height * targetAspect;
-          sx = (img.width - sw) / 2;
-        } else {
-          // Too tall: crop top/bottom (bias slightly upward for faces)
-          sh = img.width / targetAspect;
-          const extra = img.height - sh;
-          sy = Math.max(0, extra * 0.18);
+          const sx = Math.max(0, (iw - sw) / 2);
+          // Upward bias: use 35% instead of 50% center
+          const sy = Math.max(0, Math.min(ih - sh, (ih - sh) * 0.35));
+
+          const canvas = document.createElement('canvas');
+          canvas.width = outW;
+          canvas.height = outH;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) throw new Error('Canvas 2D context not available');
+
+          ctx.imageSmoothingEnabled = true;
+          ctx.imageSmoothingQuality = 'high';
+          ctx.drawImage(img, sx, sy, sw, sh, 0, 0, outW, outH);
+
+          // JPEG keeps size smaller; quality 0.92 is a good balance
+          resolve(canvas.toDataURL('image/jpeg', 0.92));
+        } catch (err) {
+          reject(err);
         }
-
-        const canvas = document.createElement('canvas');
-        canvas.width = TARGET_W;
-        canvas.height = TARGET_H;
-
-        const ctx = canvas.getContext('2d');
-        if (!ctx) {
-          resolve(dataUrl);
-          return;
-        }
-
-        ctx.drawImage(img, sx, sy, sw, sh, 0, 0, TARGET_W, TARGET_H);
-        resolve(canvas.toDataURL('image/jpeg', 0.92));
       };
-
-      img.onerror = () => resolve(dataUrl);
+      img.onerror = () => reject(new Error('Failed to decode image'));
       img.src = dataUrl;
     });
   };
 
-  // --- File Upload Handler ---
+  
   const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = async (e) => {
-        const result = (e.target?.result as string) || '';
-        const processed = result ? await processUserAvatarImage(result) : result;
-        setCustomImage(processed);
-        // Default to FALSE (Simulated/Auto-Crop Mode) for user uploads
-        // This ensures regular photos look good immediately.
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      try {
+        const result = e.target?.result as string;
+        // Crop/resize to avatar window aspect ratio
+        const normalized = await normalizeAvatarImage(result, 640, 768);
+        setCustomImage(normalized);
+
+        // User photo -> disable sprite mode for best appearance
         setIsSpriteMode(false);
         setShowSettings(false);
-      };
-      reader.readAsDataURL(file);
-    }
+      } catch (err) {
+        console.error('Avatar upload failed:', err);
+        // Fallback: still use the raw image if normalization fails
+        const result = e.target?.result as string;
+        setCustomImage(result);
+        setIsSpriteMode(false);
+        setShowSettings(false);
+      }
+    };
+    reader.readAsDataURL(file);
+  }
   };
 
   // --- Audio Infrastructure ---
@@ -499,7 +506,7 @@ export default function App() {
 
             {/* Avatar Container */}
             <div className="relative group">
-                <Avatar pose={avatarPose} imageUrl={customImage || undefined} isSpriteMode={!customImage && isSpriteMode} />
+                <Avatar pose={avatarPose} imageUrl={customImage || undefined} isSpriteMode={!!customImage || isSpriteMode} />
                 
                 {/* Visualizer Overlay */}
                 <div className="absolute bottom-0 left-0 right-0 h-20 bg-gradient-to-t from-stone-900 to-transparent flex items-end justify-center pb-4 pointer-events-none">

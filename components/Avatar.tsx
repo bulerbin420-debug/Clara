@@ -1,8 +1,9 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { AvatarPose } from '../types';
 
+
 // Strategies for loading the avatar:
-// 1. Try the local file at root ('/Clara.jpg')
+// 1. Use a bundled URL (works in Vite/Vercel builds)
 // 2. Fallback to a reliable external URL if local fails
 const LOCAL_AVATAR = new URL('../Clara.jpg', import.meta.url).href;
 const FALLBACK_AVATAR = 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?q=80&w=800&auto=format&fit=crop';
@@ -29,7 +30,7 @@ const Avatar: React.FC<AvatarProps> = ({ pose, imageUrl, isSpriteMode = false })
     img.src = LOCAL_AVATAR;
     img.onload = () => setCurrentSrc(LOCAL_AVATAR);
     img.onerror = () => {
-      console.warn('Failed to load local avatar, falling back to external image.');
+      console.warn('Failed to load local avatar:', LOCAL_AVATAR, '→ falling back to external image.');
       setCurrentSrc(FALLBACK_AVATAR);
     };
   }, [imageUrl]);
